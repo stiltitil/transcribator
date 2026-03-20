@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Transcribator</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <p class="eyebrow">Видео и аудио в текст</p>
+        <h1>Transcribator</h1>
+        <p class="lead">
+          Загрузи файл и получи не только транскрипт, но и структурированный разбор встречи:
+          цель, решения, договоренности, открытые вопросы и следующие шаги.
+        </p>
+      </section>
+
+      <section class="card uploader">
+        <form id="upload-form">
+          <label id="dropzone" class="dropzone" for="media-input">
+            <input
+              id="media-input"
+              name="media"
+              type="file"
+              accept=".mp3,.mp4,.mpeg,.mpga,.m4a,.wav,.webm,.mov,audio/*,video/*"
+              required
+            />
+            <span class="dropzone-title">Перетащи файл сюда или нажми для выбора</span>
+            <span class="dropzone-hint">Поддерживаются mp3, mp4, m4a, wav, webm, mov.</span>
+            <span id="selected-file" class="dropzone-file">Файл пока не выбран</span>
+          </label>
+
+          <button class="primary-button" type="submit">Сделать транскрипцию</button>
+        </form>
+
+        <div id="status" class="status"></div>
+      </section>
+
+      <section id="results" class="results hidden">
+        <div class="card grid-span-2">
+          <div class="section-header">
+            <h2>TL;DR</h2>
+            <p id="meta"></p>
+          </div>
+          <p id="tldr" class="summary"></p>
+        </div>
+
+        <div class="card grid-span-2">
+          <h2>Обзор встречи</h2>
+          <p id="overview" class="summary"></p>
+        </div>
+
+        <div class="card">
+          <h2>Цель созвона</h2>
+          <p id="meeting-goal" class="summary"></p>
+        </div>
+
+        <div class="card">
+          <h2>Краткий пересказ</h2>
+          <ul id="summary-points" class="highlights"></ul>
+        </div>
+
+        <div class="card">
+          <h2>Ключевые решения</h2>
+          <ul id="key-decisions" class="highlights"></ul>
+        </div>
+
+        <div class="card">
+          <h2>Договоренности</h2>
+          <ul id="agreements" class="highlights"></ul>
+        </div>
+
+        <div class="card">
+          <h2>Открытые вопросы</h2>
+          <ul id="open-questions" class="highlights"></ul>
+        </div>
+
+        <div class="card">
+          <h2>Задачи и кто что делает</h2>
+          <div id="action-items" class="action-items"></div>
+        </div>
+
+        <div class="card grid-span-2">
+          <h2>Таймкоды</h2>
+          <div id="chapters" class="chapters"></div>
+        </div>
+
+        <div class="card grid-span-2">
+          <h2>Транскрипт</h2>
+          <pre id="transcript" class="transcript"></pre>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
