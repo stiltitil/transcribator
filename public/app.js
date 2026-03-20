@@ -1,5 +1,6 @@
 const THEME_KEY = "transcribator-theme";
 const DEFAULT_THEME = "stilt";
+const THEMES = ["stilt", "neon", "noir"];
 
 const form = document.querySelector("#upload-form");
 const input = document.querySelector("#media-input");
@@ -26,7 +27,9 @@ const dragEvents = ["dragenter", "dragover", "dragleave", "drop"];
 applyTheme(loadTheme());
 
 themeToggle.addEventListener("click", () => {
-  const nextTheme = document.body.dataset.theme === "neon" ? "stilt" : "neon";
+  const currentTheme = document.body.dataset.theme;
+  const currentIndex = THEMES.indexOf(currentTheme);
+  const nextTheme = THEMES[(currentIndex + 1) % THEMES.length];
   applyTheme(nextTheme);
   localStorage.setItem(THEME_KEY, nextTheme);
 });
@@ -108,16 +111,15 @@ form.addEventListener("submit", async (event) => {
 
 function loadTheme() {
   const stored = localStorage.getItem(THEME_KEY);
-  return stored === "neon" || stored === "stilt" ? stored : DEFAULT_THEME;
+  return THEMES.includes(stored) ? stored : DEFAULT_THEME;
 }
 
 function applyTheme(theme) {
   document.body.dataset.theme = theme;
-  themeBadge.textContent = theme === "neon" ? "NEON" : "STILT";
-  themeToggle.title =
-    theme === "neon"
-      ? "Переключить на тему STILT"
-      : "Переключить на neon-тему";
+  themeBadge.textContent = theme.toUpperCase();
+
+  const nextTheme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  themeToggle.title = `Переключить на тему ${nextTheme.toUpperCase()}`;
 }
 
 function setLoading(isLoading) {
