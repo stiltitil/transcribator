@@ -51,6 +51,8 @@ npm.cmd start
 
 5. Открой [http://localhost:3000](http://localhost:3000)
 
+Или просто запусти [start-app.bat](c:\Users\Askay\Desktop\AI\transcribator\start-app.bat) двойным кликом: он откроет сервер и браузер автоматически.
+
 ## Переменные окружения
 
 - `OPENAI_API_KEY` - обязательный ключ OpenAI API

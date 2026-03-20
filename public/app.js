@@ -1,3 +1,6 @@
+const THEME_KEY = "transcribator-theme";
+const DEFAULT_THEME = "stilt";
+
 const form = document.querySelector("#upload-form");
 const input = document.querySelector("#media-input");
 const dropzone = document.querySelector("#dropzone");
@@ -16,7 +19,17 @@ const chaptersNode = document.querySelector("#chapters");
 const transcriptNode = document.querySelector("#transcript");
 const metaNode = document.querySelector("#meta");
 const submitButton = form.querySelector("button");
+const themeToggle = document.querySelector("#theme-toggle");
+const themeBadge = document.querySelector("#theme-badge");
 const dragEvents = ["dragenter", "dragover", "dragleave", "drop"];
+
+applyTheme(loadTheme());
+
+themeToggle.addEventListener("click", () => {
+  const nextTheme = document.body.dataset.theme === "neon" ? "stilt" : "neon";
+  applyTheme(nextTheme);
+  localStorage.setItem(THEME_KEY, nextTheme);
+});
 
 for (const eventName of dragEvents) {
   window.addEventListener(eventName, preventBrowserFileOpen, false);
@@ -92,6 +105,20 @@ form.addEventListener("submit", async (event) => {
     setLoading(false);
   }
 });
+
+function loadTheme() {
+  const stored = localStorage.getItem(THEME_KEY);
+  return stored === "neon" || stored === "stilt" ? stored : DEFAULT_THEME;
+}
+
+function applyTheme(theme) {
+  document.body.dataset.theme = theme;
+  themeBadge.textContent = theme === "neon" ? "NEON" : "STILT";
+  themeToggle.title =
+    theme === "neon"
+      ? "Переключить на тему STILT"
+      : "Переключить на neon-тему";
+}
 
 function setLoading(isLoading) {
   submitButton.disabled = isLoading;
