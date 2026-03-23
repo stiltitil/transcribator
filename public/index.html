@@ -24,6 +24,19 @@
 
       <section class="card uploader">
         <form id="upload-form">
+          <div class="provider-bar">
+            <label class="provider-picker" for="provider-select">
+              <span class="provider-label">ASR</span>
+              <select id="provider-select" name="provider">
+                <option value="openai">OpenAI</option>
+                <option value="deepgram">Deepgram</option>
+              </select>
+            </label>
+            <p id="provider-hint" class="provider-hint">
+              Выбери движок распознавания для A/B теста перед запуском транскрибации.
+            </p>
+          </div>
+
           <label id="dropzone" class="dropzone" for="media-input">
             <input
               id="media-input"

@@ -13,7 +13,7 @@ dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const transcriptionProvider = normalizeProvider(process.env.TRANSCRIBE_PROVIDER);
+const defaultTranscriptionProvider = normalizeProvider(process.env.TRANSCRIBE_PROVIDER);
 const uploadDir = path.join(__dirname, "uploads");
 const maxUploadBytes = Number(process.env.MAX_UPLOAD_MB || 512) * 1024 * 1024;
 const maxApiFileBytes = 24 * 1024 * 1024;
@@ -100,20 +100,22 @@ app.use(express.static(path.join(__dirname, "public")));
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    provider: transcriptionProvider,
+    provider: defaultTranscriptionProvider,
+    availableProviders: ["openai", "deepgram"],
     hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
     hasDeepgramKey: Boolean(process.env.DEEPGRAM_API_KEY),
-    transcriptionModel: getActiveTranscriptionModel(),
+    transcriptionModel: getActiveTranscriptionModel(defaultTranscriptionProvider),
     summaryModel: process.env.SUMMARY_MODEL || "gpt-4o-mini",
   });
 });
 
 app.post("/api/transcribe", upload.single("media"), async (req, res) => {
   let cleanupPaths = [];
+  const transcriptionProvider = resolveTranscriptionProvider(req.body?.provider);
 
-  if (!canTranscribeWithConfiguredProvider()) {
+  if (!canTranscribeWithConfiguredProvider(transcriptionProvider)) {
     res.status(500).json({
-      error: getMissingProviderKeyMessage(),
+      error: getMissingProviderKeyMessage(transcriptionProvider),
     });
     return;
   }
@@ -136,7 +138,7 @@ app.post("/api/transcribe", upload.single("media"), async (req, res) => {
     const prepared = await prepareMediaForTranscription(req.file);
     cleanupPaths = prepared.cleanupPaths;
 
-    const transcript = await transcribePreparedChunks(prepared.chunks);
+    const transcript = await transcribePreparedChunks(prepared.chunks, transcriptionProvider);
     const normalized = normalizeTranscript(transcript);
     const summary = await summarizeTranscript(normalized);
 
@@ -162,7 +164,7 @@ app.post("/api/transcribe", upload.single("media"), async (req, res) => {
         chunkCount: prepared.chunks.length,
         preprocessing: prepared.mode,
         transcriptionProvider,
-        transcriptionModel: getActiveTranscriptionModel(),
+        transcriptionModel: getActiveTranscriptionModel(transcriptionProvider),
         summaryModel: process.env.SUMMARY_MODEL || "gpt-4o-mini",
       },
     });
@@ -195,7 +197,7 @@ app.listen(port, () => {
   console.log(`Transcribator is running on http://localhost:${port}`);
 });
 
-async function transcribeFile(filePath) {
+async function transcribeFile(filePath, transcriptionProvider) {
   if (transcriptionProvider === "deepgram") {
     return transcribeFileWithDeepgram(filePath);
   }
@@ -328,7 +330,7 @@ function buildSegmentsFromWords(words) {
     .filter((segment) => segment.text);
 }
 
-async function transcribePreparedChunks(chunks) {
+async function transcribePreparedChunks(chunks, transcriptionProvider) {
   const combined = {
     text: "",
     language: "unknown",
@@ -337,7 +339,7 @@ async function transcribePreparedChunks(chunks) {
 
   for (let index = 0; index < chunks.length; index += 1) {
     const chunk = chunks[index];
-    const transcript = await transcribeFile(chunk.path);
+    const transcript = await transcribeFile(chunk.path, transcriptionProvider);
     const text = (transcript.text || "").trim();
     const segments = Array.isArray(transcript.segments) ? transcript.segments : [];
 
@@ -826,7 +828,7 @@ function getOpenAIClient() {
   });
 }
 
-function canTranscribeWithConfiguredProvider() {
+function canTranscribeWithConfiguredProvider(transcriptionProvider) {
   if (transcriptionProvider === "deepgram") {
     return Boolean(process.env.DEEPGRAM_API_KEY);
   }
@@ -834,7 +836,7 @@ function canTranscribeWithConfiguredProvider() {
   return Boolean(process.env.OPENAI_API_KEY);
 }
 
-function getMissingProviderKeyMessage() {
+function getMissingProviderKeyMessage(transcriptionProvider) {
   if (transcriptionProvider === "deepgram") {
     return "DEEPGRAM_API_KEY is not configured.";
   }
@@ -842,7 +844,7 @@ function getMissingProviderKeyMessage() {
   return "OPENAI_API_KEY is not configured.";
 }
 
-function getActiveTranscriptionModel() {
+function getActiveTranscriptionModel(transcriptionProvider) {
   return transcriptionProvider === "deepgram"
     ? deepgramModel
     : process.env.TRANSCRIPTION_MODEL || "whisper-1";
@@ -850,4 +852,8 @@ function getActiveTranscriptionModel() {
 
 function normalizeProvider(value) {
   return String(value || "openai").trim().toLowerCase() === "deepgram" ? "deepgram" : "openai";
+}
+
+function resolveTranscriptionProvider(value) {
+  return normalizeProvider(value || defaultTranscriptionProvider);
 }

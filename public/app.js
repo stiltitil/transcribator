@@ -21,9 +21,12 @@ const metaNode = document.querySelector("#meta");
 const submitButton = form.querySelector("button");
 const themeToggle = document.querySelector("#theme-toggle");
 const themeBadge = document.querySelector("#theme-badge");
+const providerSelect = document.querySelector("#provider-select");
+const providerHint = document.querySelector("#provider-hint");
 const dragEvents = ["dragenter", "dragover", "dragleave", "drop"];
 
 applyTheme(loadTheme());
+hydrateProviderPicker();
 
 themeToggle.addEventListener("click", () => {
   const nextTheme = document.body.dataset.theme === "neon" ? "stilt" : "neon";
@@ -78,11 +81,12 @@ form.addEventListener("submit", async (event) => {
   }
 
   const formData = new FormData();
+  formData.append("provider", providerSelect.value);
   formData.append("media", file);
 
   setLoading(true);
   renderStatus(
-    `Обрабатываю "${file.name}". Сначала подготовлю аудио, затем сделаю транскрипцию и соберу структурированное саммари.`
+    `Обрабатываю "${file.name}" через ${getProviderLabel(providerSelect.value)}. Сначала подготовлю аудио, затем сделаю транскрипцию и соберу структурированное саммари.`
   );
 
   try {
@@ -118,6 +122,40 @@ function applyTheme(theme) {
     theme === "neon"
       ? "Переключить на тему STILT"
       : "Переключить на neon-тему";
+}
+
+providerSelect.addEventListener("change", () => {
+  renderProviderHint();
+});
+
+async function hydrateProviderPicker() {
+  try {
+    const response = await fetch("/api/health");
+    const payload = await response.json();
+
+    if (response.ok && payload?.provider) {
+      providerSelect.value = payload.provider === "deepgram" ? "deepgram" : "openai";
+      renderProviderHint(payload);
+      return;
+    }
+  } catch {
+    // Ignore health bootstrap errors.
+  }
+
+  renderProviderHint();
+}
+
+function renderProviderHint(payload = null) {
+  if (providerSelect.value === "deepgram") {
+    providerHint.textContent = payload?.hasDeepgramKey
+      ? "Deepgram выбран для A/B теста. OpenAI все равно нужен для генерации саммари."
+      : "Deepgram выбран, но DEEPGRAM_API_KEY пока не найден на сервере.";
+    return;
+  }
+
+  providerHint.textContent = payload?.hasOpenAiKey === false
+    ? "OpenAI выбран, но OPENAI_API_KEY пока не найден на сервере."
+    : "OpenAI выбран как базовый режим транскрибации.";
 }
 
 function setLoading(isLoading) {
@@ -241,6 +279,10 @@ function formatSeconds(value) {
   }
 
   return [minutes, seconds].map((item) => String(item).padStart(2, "0")).join(":");
+}
+
+function getProviderLabel(provider) {
+  return provider === "deepgram" ? "Deepgram" : "OpenAI";
 }
 
 function escapeHtml(value) {
