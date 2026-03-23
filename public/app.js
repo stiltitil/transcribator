@@ -140,6 +140,10 @@ function renderResults(payload) {
 
   metaNode.textContent = [
     payload.fileName,
+    payload.metadata?.transcriptionProvider
+      ? `Провайдер: ${payload.metadata.transcriptionProvider}`
+      : null,
+    payload.metadata?.transcriptionModel ? `ASR: ${payload.metadata.transcriptionModel}` : null,
     payload.metadata?.detectedLanguage ? `Язык: ${payload.metadata.detectedLanguage}` : null,
     typeof payload.metadata?.durationSeconds === "number" && payload.metadata.durationSeconds > 0
       ? `Длительность: ${formatSeconds(payload.metadata.durationSeconds)}`

@@ -13,11 +13,19 @@ dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+const transcriptionProvider = normalizeProvider(process.env.TRANSCRIBE_PROVIDER);
 const uploadDir = path.join(__dirname, "uploads");
 const maxUploadBytes = Number(process.env.MAX_UPLOAD_MB || 512) * 1024 * 1024;
 const maxApiFileBytes = 24 * 1024 * 1024;
 const preparedAudioBitrate = process.env.AUDIO_BITRATE || "48k";
 const preparedAudioSampleRate = process.env.AUDIO_SAMPLE_RATE || "16000";
+const deepgramModel = process.env.DEEPGRAM_MODEL || "nova-3";
+const deepgramLanguage = process.env.DEEPGRAM_LANGUAGE || "ru";
+const deepgramPunctuate = process.env.DEEPGRAM_PUNCTUATE !== "false";
+const deepgramDiarize = process.env.DEEPGRAM_DIARIZE !== "false";
+const deepgramUtterances = process.env.DEEPGRAM_UTTERANCES !== "false";
+const deepgramSmartFormat = process.env.DEEPGRAM_SMART_FORMAT !== "false";
+const deepgramUtteranceSplit = process.env.DEEPGRAM_UTT_SPLIT || "";
 
 const supportedMimeTypes = new Set([
   "audio/mpeg",
@@ -45,6 +53,10 @@ const supportedExtensions = new Set([
 
 if (!process.env.OPENAI_API_KEY) {
   console.warn("OPENAI_API_KEY is missing. API routes will fail until it is set.");
+}
+
+if (transcriptionProvider === "deepgram" && !process.env.DEEPGRAM_API_KEY) {
+  console.warn("DEEPGRAM_API_KEY is missing. Deepgram transcription will fail until it is set.");
 }
 
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -88,8 +100,10 @@ app.use(express.static(path.join(__dirname, "public")));
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    hasApiKey: Boolean(process.env.OPENAI_API_KEY),
-    transcriptionModel: process.env.TRANSCRIPTION_MODEL || "whisper-1",
+    provider: transcriptionProvider,
+    hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
+    hasDeepgramKey: Boolean(process.env.DEEPGRAM_API_KEY),
+    transcriptionModel: getActiveTranscriptionModel(),
     summaryModel: process.env.SUMMARY_MODEL || "gpt-4o-mini",
   });
 });
@@ -97,9 +111,16 @@ app.get("/api/health", (_req, res) => {
 app.post("/api/transcribe", upload.single("media"), async (req, res) => {
   let cleanupPaths = [];
 
+  if (!canTranscribeWithConfiguredProvider()) {
+    res.status(500).json({
+      error: getMissingProviderKeyMessage(),
+    });
+    return;
+  }
+
   if (!process.env.OPENAI_API_KEY) {
     res.status(500).json({
-      error: "OPENAI_API_KEY is not configured.",
+      error: "OPENAI_API_KEY is not configured. It is still required for meeting summaries.",
     });
     return;
   }
@@ -140,7 +161,8 @@ app.post("/api/transcribe", upload.single("media"), async (req, res) => {
         preparedAudioSizeMb: toMb(prepared.audioSizeBytes),
         chunkCount: prepared.chunks.length,
         preprocessing: prepared.mode,
-        transcriptionModel: process.env.TRANSCRIPTION_MODEL || "whisper-1",
+        transcriptionProvider,
+        transcriptionModel: getActiveTranscriptionModel(),
         summaryModel: process.env.SUMMARY_MODEL || "gpt-4o-mini",
       },
     });
@@ -174,6 +196,14 @@ app.listen(port, () => {
 });
 
 async function transcribeFile(filePath) {
+  if (transcriptionProvider === "deepgram") {
+    return transcribeFileWithDeepgram(filePath);
+  }
+
+  return transcribeFileWithOpenAI(filePath);
+}
+
+async function transcribeFileWithOpenAI(filePath) {
   const openai = getOpenAIClient();
   const transcriptionModel = process.env.TRANSCRIPTION_MODEL || "whisper-1";
 
@@ -185,6 +215,117 @@ async function transcribeFile(filePath) {
   });
 
   return response;
+}
+
+async function transcribeFileWithDeepgram(filePath) {
+  const query = new URLSearchParams({
+    model: deepgramModel,
+    language: deepgramLanguage,
+    punctuate: String(deepgramPunctuate),
+    diarize: String(deepgramDiarize),
+    utterances: String(deepgramUtterances),
+    smart_format: String(deepgramSmartFormat),
+  });
+
+  if (deepgramUtteranceSplit) {
+    query.set("utt_split", deepgramUtteranceSplit);
+  }
+
+  const audioBuffer = await fsp.readFile(filePath);
+  const response = await fetch(`https://api.deepgram.com/v1/listen?${query.toString()}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
+      "Content-Type": "audio/mpeg",
+    },
+    body: audioBuffer,
+  });
+
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const apiMessage =
+      payload?.err_msg || payload?.message || payload?.error || "Deepgram transcription failed.";
+    throw new Error(apiMessage);
+  }
+
+  return normalizeDeepgramResponse(payload);
+}
+
+function normalizeDeepgramResponse(payload) {
+  const result = payload?.results || {};
+  const firstAlternative = result?.channels?.[0]?.alternatives?.[0] || {};
+  const utterances = Array.isArray(result.utterances) ? result.utterances : [];
+
+  const segments = utterances
+    .map((utterance, index) => ({
+      id: utterance.id || index,
+      start: Number(utterance.start || 0),
+      end: Number(utterance.end || 0),
+      text: String(utterance.transcript || "").trim(),
+      speaker:
+        typeof utterance.speaker === "number" || typeof utterance.speaker === "string"
+          ? utterance.speaker
+          : undefined,
+      words: Array.isArray(utterance.words) ? utterance.words : [],
+    }))
+    .filter((segment) => segment.text);
+
+  const fallbackWords = Array.isArray(firstAlternative.words) ? firstAlternative.words : [];
+  const transcriptText = String(firstAlternative.transcript || "").trim();
+
+  return {
+    text: transcriptText || segments.map((segment) => segment.text).join("\n").trim(),
+    language: result?.languages?.[0] || deepgramLanguage || "unknown",
+    segments: segments.length > 0 ? segments : buildSegmentsFromWords(fallbackWords),
+  };
+}
+
+function buildSegmentsFromWords(words) {
+  if (!Array.isArray(words) || words.length === 0) {
+    return [];
+  }
+
+  const grouped = [];
+  let current = null;
+
+  for (const word of words) {
+    const token = String(word?.punctuated_word || word?.word || "").trim();
+
+    if (!token) {
+      continue;
+    }
+
+    const speaker =
+      typeof word?.speaker === "number" || typeof word?.speaker === "string"
+        ? word.speaker
+        : "unknown";
+
+    if (!current || current.speaker !== speaker) {
+      current = {
+        id: grouped.length,
+        start: Number(word.start || 0),
+        end: Number(word.end || 0),
+        speaker,
+        textParts: [token],
+      };
+      grouped.push(current);
+      continue;
+    }
+
+    current.end = Number(word.end || current.end || 0);
+    current.textParts.push(token);
+  }
+
+  return grouped
+    .map((segment) => ({
+      id: segment.id,
+      start: segment.start,
+      end: segment.end,
+      text: segment.textParts.join(" ").trim(),
+      speaker: segment.speaker,
+    }))
+    .filter((segment) => segment.text);
 }
 
 async function transcribePreparedChunks(chunks) {
@@ -387,6 +528,10 @@ function normalizeTranscript(transcript) {
       startLabel: formatTimestamp(segment.start),
       endLabel: formatTimestamp(segment.end),
       text: (segment.text || "").trim(),
+      speaker:
+        typeof segment.speaker === "number" || typeof segment.speaker === "string"
+          ? segment.speaker
+          : undefined,
     }))
     .filter((segment) => segment.text);
 
@@ -679,4 +824,30 @@ function getOpenAIClient() {
   return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
+}
+
+function canTranscribeWithConfiguredProvider() {
+  if (transcriptionProvider === "deepgram") {
+    return Boolean(process.env.DEEPGRAM_API_KEY);
+  }
+
+  return Boolean(process.env.OPENAI_API_KEY);
+}
+
+function getMissingProviderKeyMessage() {
+  if (transcriptionProvider === "deepgram") {
+    return "DEEPGRAM_API_KEY is not configured.";
+  }
+
+  return "OPENAI_API_KEY is not configured.";
+}
+
+function getActiveTranscriptionModel() {
+  return transcriptionProvider === "deepgram"
+    ? deepgramModel
+    : process.env.TRANSCRIPTION_MODEL || "whisper-1";
+}
+
+function normalizeProvider(value) {
+  return String(value || "openai").trim().toLowerCase() === "deepgram" ? "deepgram" : "openai";
 }
