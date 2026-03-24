@@ -16,6 +16,8 @@
       <section class="hero">
         <p class="eyebrow">Видео и аудио в текст</p>
         <h1>Transcribator</h1>
+        <p id="provider-badge" class="provider-badge">ASR: loading...</p>
+        <button id="settings-toggle" class="settings-toggle" type="button">API settings</button>
         <p class="lead">
           Загрузи файл и получи не только транскрипт, но и структурированный разбор встречи:
           цель, решения, договоренности, открытые вопросы и следующие шаги.
@@ -23,7 +25,53 @@
       </section>
 
       <section class="card uploader">
+        <section id="settings-panel" class="settings-panel hidden">
+          <div class="settings-header">
+            <h2>Настройки API</h2>
+            <p id="settings-status" class="settings-status"></p>
+          </div>
+
+          <div class="settings-grid">
+            <label class="settings-field">
+              <span>Deepgram API Key</span>
+              <input id="deepgram-api-key" type="password" placeholder="Вставь Deepgram secret key" />
+              <small id="deepgram-key-preview"></small>
+            </label>
+
+            <label class="settings-field">
+              <span>OpenAI API Key</span>
+              <input id="openai-api-key" type="password" placeholder="Вставь OpenAI API key" />
+              <small id="openai-key-preview"></small>
+            </label>
+
+            <label class="settings-field">
+              <span>Deepgram model</span>
+              <input id="deepgram-model" type="text" value="nova-3" />
+            </label>
+
+            <label class="settings-field">
+              <span>Deepgram language</span>
+              <input id="deepgram-language" type="text" value="ru" />
+            </label>
+
+            <label class="settings-field">
+              <span>Summary model</span>
+              <input id="summary-model" type="text" value="gpt-4o-mini" />
+            </label>
+          </div>
+
+          <div class="settings-actions">
+            <button id="check-settings" class="secondary-button" type="button">Проверить ключи</button>
+            <button id="save-settings" class="secondary-button" type="button">Сохранить настройки</button>
+          </div>
+        </section>
+
         <form id="upload-form">
+          <label class="summary-toggle" for="include-summary">
+            <input id="include-summary" name="includeSummary" type="checkbox" />
+            <span>Сделать summary встречи</span>
+          </label>
+
           <label id="dropzone" class="dropzone" for="media-input">
             <input
               id="media-input"
@@ -44,6 +92,21 @@
       </section>
 
       <section id="results" class="results hidden">
+        <div class="results-toolbar grid-span-2">
+          <label class="download-format" for="download-format">
+            <span>Format</span>
+            <select id="download-format">
+              <option value="md">Markdown (.md)</option>
+              <option value="txt">Text (.txt)</option>
+              <option value="srt">Subtitles (.srt)</option>
+              <option value="json">JSON (.json)</option>
+            </select>
+          </label>
+          <button id="download-report" class="secondary-button" type="button">
+            Скачать файл
+          </button>
+        </div>
+
         <div class="card grid-span-2">
           <div class="section-header">
             <h2>TL;DR</h2>

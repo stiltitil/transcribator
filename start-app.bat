@@ -10,10 +10,10 @@ if not exist ".env" (
   exit /b 1
 )
 
-start "Transcribator Server" cmd /k "cd /d %~dp0 && set PORT=3000 && npm.cmd start"
+start "Transcribator Server" cmd /k "cd /d %~dp0 && set PORT=3100 && npm.cmd start"
 
 timeout /t 2 /nobreak >nul
-start "" "http://localhost:3000"
+start "" "http://localhost:3100"
 
 echo Transcribator запускается...
 echo Если браузер открылся раньше сервера, просто обнови страницу через пару секунд.

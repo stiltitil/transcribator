@@ -6,20 +6,24 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
-const ffmpegPath = require("ffmpeg-static");
-const ffprobe = require("ffprobe-static");
+const rawFfmpegPath = require("ffmpeg-static");
+const rawFfprobe = require("ffprobe-static");
 
-dotenv.config();
+dotenv.config({
+  path: resolveEnvPath(),
+});
+
+applySettingsToEnv(loadPersistedSettings());
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const uploadDir = path.join(__dirname, "uploads");
+const uploadDir = process.env.TRANSCRIBATOR_UPLOAD_DIR || path.join(__dirname, "uploads");
 const maxUploadBytes = Number(process.env.MAX_UPLOAD_MB || 512) * 1024 * 1024;
 const maxApiFileBytes = 24 * 1024 * 1024;
 const preparedAudioBitrate = process.env.AUDIO_BITRATE || "48k";
 const preparedAudioSampleRate = process.env.AUDIO_SAMPLE_RATE || "16000";
-const deepgramModel = process.env.DEEPGRAM_MODEL || "nova-3";
-const deepgramLanguage = process.env.DEEPGRAM_LANGUAGE || "ru";
+const ffmpegPath = resolveBundledBinaryPath(rawFfmpegPath);
+const ffprobePath = resolveBundledBinaryPath(rawFfprobe?.path);
 
 const supportedMimeTypes = new Set([
   "audio/mpeg",
@@ -96,13 +100,77 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     hasTranscriptionKey: Boolean(process.env.DEEPGRAM_API_KEY),
     hasSummaryKey: Boolean(process.env.OPENAI_API_KEY),
-    transcriptionModel: deepgramModel,
-    summaryModel: process.env.SUMMARY_MODEL || "gpt-4o-mini",
+    transcriptionModel: getDeepgramModel(),
+    summaryModel: getSummaryModel(),
   });
+});
+
+app.get("/api/settings", (_req, res) => {
+  res.json({
+    hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
+    hasDeepgramKey: Boolean(process.env.DEEPGRAM_API_KEY),
+    openAiApiKey: process.env.OPENAI_API_KEY || "",
+    deepgramApiKey: process.env.DEEPGRAM_API_KEY || "",
+    openAiKeyPreview: maskSecret(process.env.OPENAI_API_KEY),
+    deepgramKeyPreview: maskSecret(process.env.DEEPGRAM_API_KEY),
+    deepgramModel: getDeepgramModel(),
+    deepgramLanguage: getDeepgramLanguage(),
+    summaryModel: getSummaryModel(),
+  });
+});
+
+app.post("/api/settings", async (req, res) => {
+  try {
+    const existing = loadPersistedSettings();
+    const next = {
+      ...existing,
+      ...sanitizeSettingsPayload(req.body || {}),
+    };
+
+    persistSettings(next);
+    applySettingsToEnv(next);
+
+    res.json({
+      ok: true,
+      hasOpenAiKey: Boolean(process.env.OPENAI_API_KEY),
+      hasDeepgramKey: Boolean(process.env.DEEPGRAM_API_KEY),
+      openAiApiKey: process.env.OPENAI_API_KEY || "",
+      deepgramApiKey: process.env.DEEPGRAM_API_KEY || "",
+      openAiKeyPreview: maskSecret(process.env.OPENAI_API_KEY),
+      deepgramKeyPreview: maskSecret(process.env.DEEPGRAM_API_KEY),
+      deepgramModel: getDeepgramModel(),
+      deepgramLanguage: getDeepgramLanguage(),
+      summaryModel: getSummaryModel(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error.message || "Failed to save settings.",
+    });
+  }
+});
+
+app.post("/api/settings/check", async (_req, res) => {
+  try {
+    const [deepgram, openai] = await Promise.all([
+      checkDeepgramCredentials(),
+      checkOpenAiCredentials(),
+    ]);
+
+    res.json({
+      ok: true,
+      deepgram,
+      openai,
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error.message || "Failed to check credentials.",
+    });
+  }
 });
 
 app.post("/api/transcribe", upload.single("media"), async (req, res) => {
   let cleanupPaths = [];
+  const includeSummary = shouldIncludeSummary(req.body?.includeSummary);
 
   if (!process.env.DEEPGRAM_API_KEY) {
     res.status(500).json({
@@ -111,7 +179,7 @@ app.post("/api/transcribe", upload.single("media"), async (req, res) => {
     return;
   }
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (includeSummary && !process.env.OPENAI_API_KEY) {
     res.status(500).json({
       error: "OPENAI_API_KEY is not configured.",
     });
@@ -131,7 +199,9 @@ app.post("/api/transcribe", upload.single("media"), async (req, res) => {
 
     const transcript = await transcribePreparedChunks(prepared.chunks);
     const normalized = normalizeTranscript(transcript);
-    const summary = await summarizeTranscript(normalized);
+    const summary = includeSummary
+      ? await summarizeTranscript(normalized)
+      : emptySummary(normalized.segments);
 
     res.json({
       fileName: req.file.originalname,
@@ -154,8 +224,9 @@ app.post("/api/transcribe", upload.single("media"), async (req, res) => {
         preparedAudioSizeMb: toMb(prepared.audioSizeBytes),
         chunkCount: prepared.chunks.length,
         preprocessing: prepared.mode,
-        transcriptionModel: deepgramModel,
-        summaryModel: process.env.SUMMARY_MODEL || "gpt-4o-mini",
+        transcriptionModel: getDeepgramModel(),
+        summaryEnabled: includeSummary,
+        summaryModel: includeSummary ? getSummaryModel() : null,
       },
     });
   } catch (error) {
@@ -183,14 +254,24 @@ app.use((error, _req, res, _next) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`Transcribator is running on http://localhost:${port}`);
-});
+let activeServer = null;
+
+function startServer(customPort = port) {
+  if (activeServer) {
+    return activeServer;
+  }
+
+  activeServer = app.listen(customPort, () => {
+    console.log(`Transcribator is running on http://localhost:${customPort}`);
+  });
+
+  return activeServer;
+}
 
 async function transcribeFile(filePath) {
   const query = new URLSearchParams({
-    model: deepgramModel,
-    language: deepgramLanguage,
+    model: getDeepgramModel(),
+    language: getDeepgramLanguage(),
     punctuate: "true",
     diarize: "true",
     utterances: "true",
@@ -268,7 +349,7 @@ function normalizeDeepgramTranscript(payload) {
     text:
       String(alternative.transcript || "").trim() ||
       segments.map((segment) => segment.text).join("\n").trim(),
-    language: results?.languages?.[0] || deepgramLanguage || "unknown",
+    language: results?.languages?.[0] || getDeepgramLanguage() || "unknown",
     segments,
   };
 }
@@ -416,11 +497,11 @@ async function splitAudioIntoChunks(inputPath, chunkDurationSeconds, baseName) {
 }
 
 async function probeDuration(filePath) {
-  if (!ffprobe?.path) {
+  if (!ffprobePath) {
     throw new Error("ffprobe is not available in the project.");
   }
 
-  const result = await runProcess(ffprobe.path, [
+  const result = await runProcess(ffprobePath, [
     "-v",
     "error",
     "-show_entries",
@@ -615,6 +696,21 @@ function normalizeActionItems(items) {
     .filter((item) => item.task);
 }
 
+function emptySummary(segments) {
+  return {
+    overview: "Саммари отключено для этого запуска.",
+    summary: [],
+    tldr: "Саммари отключено.",
+    meetingGoal: "Саммари отключено.",
+    highlights: [],
+    keyDecisions: [],
+    agreements: [],
+    openQuestions: [],
+    actionItems: [],
+    chapters: fallbackChapters(segments),
+  };
+}
+
 function fallbackSummary(segments) {
   return {
     overview: "Не удалось автоматически собрать структурированное саммари. Ниже доступен полный транскрипт встречи.",
@@ -780,4 +876,210 @@ function getOpenAIClient() {
   return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
+}
+
+function shouldIncludeSummary(value) {
+  return String(value ?? "true").trim().toLowerCase() !== "false";
+}
+
+async function checkDeepgramCredentials() {
+  if (!process.env.DEEPGRAM_API_KEY) {
+    return {
+      ok: false,
+      message: "Deepgram key is missing.",
+    };
+  }
+
+  try {
+    const response = await fetch("https://api.deepgram.com/v1/projects", {
+      headers: {
+        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
+      },
+    });
+
+    if (response.ok) {
+      return {
+        ok: true,
+        message: "Deepgram key is valid.",
+      };
+    }
+
+    const payload = await response.json().catch(() => null);
+
+    return {
+      ok: false,
+      message:
+        payload?.message || payload?.details || payload?.error || `Deepgram responded with ${response.status}.`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error.message || "Deepgram check failed.",
+    };
+  }
+}
+
+async function checkOpenAiCredentials() {
+  if (!process.env.OPENAI_API_KEY) {
+    return {
+      ok: false,
+      message: "OpenAI key is missing.",
+    };
+  }
+
+  try {
+    const openai = getOpenAIClient();
+    await openai.models.list();
+
+    return {
+      ok: true,
+      message: "OpenAI key is valid.",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error?.message || "OpenAI check failed.",
+    };
+  }
+}
+
+function resolveEnvPath() {
+  const candidates = [
+    process.env.TRANSCRIBATOR_ENV_PATH,
+    process.env.PORTABLE_EXECUTABLE_DIR
+      ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, ".env")
+      : null,
+    process.resourcesPath ? path.join(process.resourcesPath, ".env") : null,
+    path.join(process.cwd(), ".env"),
+    path.join(__dirname, ".env"),
+  ].filter(Boolean);
+
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function resolveBundledBinaryPath(binaryPath) {
+  if (!binaryPath) {
+    return binaryPath;
+  }
+
+  const unpackedPath = binaryPath.replace("app.asar", "app.asar.unpacked");
+
+  if (unpackedPath !== binaryPath && fs.existsSync(unpackedPath)) {
+    return unpackedPath;
+  }
+
+  if (fs.existsSync(binaryPath)) {
+    return binaryPath;
+  }
+
+  return binaryPath;
+}
+
+function resolveSettingsPath() {
+  const candidates = [
+    process.env.TRANSCRIBATOR_SETTINGS_PATH,
+    process.env.PORTABLE_EXECUTABLE_DIR
+      ? path.join(process.env.PORTABLE_EXECUTABLE_DIR, "transcribator-settings.json")
+      : null,
+    process.resourcesPath ? path.join(process.resourcesPath, "transcribator-settings.json") : null,
+    path.join(process.cwd(), "transcribator-settings.json"),
+    path.join(__dirname, "transcribator-settings.json"),
+  ].filter(Boolean);
+
+  return candidates[0];
+}
+
+function loadPersistedSettings() {
+  const settingsPath = resolveSettingsPath();
+
+  if (!settingsPath || !fs.existsSync(settingsPath)) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function persistSettings(settings) {
+  const settingsPath = resolveSettingsPath();
+
+  if (!settingsPath) {
+    throw new Error("Settings path is not available.");
+  }
+
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+}
+
+function applySettingsToEnv(settings) {
+  const mapping = {
+    openAiApiKey: "OPENAI_API_KEY",
+    deepgramApiKey: "DEEPGRAM_API_KEY",
+    deepgramModel: "DEEPGRAM_MODEL",
+    deepgramLanguage: "DEEPGRAM_LANGUAGE",
+    summaryModel: "SUMMARY_MODEL",
+  };
+
+  for (const [key, envName] of Object.entries(mapping)) {
+    if (typeof settings[key] === "string") {
+      process.env[envName] = settings[key];
+    }
+  }
+}
+
+function sanitizeSettingsPayload(payload) {
+  return {
+    openAiApiKey: normalizeSettingValue(payload.openAiApiKey),
+    deepgramApiKey: normalizeSettingValue(payload.deepgramApiKey),
+    deepgramModel: normalizeSettingValue(payload.deepgramModel, "nova-3"),
+    deepgramLanguage: normalizeSettingValue(payload.deepgramLanguage, "ru"),
+    summaryModel: normalizeSettingValue(payload.summaryModel, "gpt-4o-mini"),
+  };
+}
+
+function normalizeSettingValue(value, fallback = "") {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || fallback;
+}
+
+function maskSecret(value) {
+  const normalized = String(value || "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized.length <= 8) {
+    return "••••••••";
+  }
+
+  return `${normalized.slice(0, 4)}••••${normalized.slice(-4)}`;
+}
+
+function getDeepgramModel() {
+  return process.env.DEEPGRAM_MODEL || "nova-3";
+}
+
+function getDeepgramLanguage() {
+  return process.env.DEEPGRAM_LANGUAGE || "ru";
+}
+
+function getSummaryModel() {
+  return process.env.SUMMARY_MODEL || "gpt-4o-mini";
+}
+
+module.exports = {
+  app,
+  startServer,
+};
+
+if (require.main === module) {
+  startServer();
 }

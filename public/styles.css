@@ -203,6 +203,101 @@ body[data-theme="neon"] h2 {
   line-height: 1.7;
 }
 
+.provider-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body[data-theme="neon"] .provider-badge {
+  box-shadow: 0 0 18px rgba(0, 231, 255, 0.12);
+}
+
+.settings-toggle {
+  margin-top: 12px;
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.settings-panel {
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-strong) 90%, transparent);
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: baseline;
+  margin-bottom: 14px;
+}
+
+.settings-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.settings-field {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-field span {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.settings-field input {
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font: inherit;
+}
+
+.settings-field small {
+  color: var(--muted);
+  min-height: 18px;
+}
+
+.settings-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .card {
   position: relative;
   background: var(--surface);
@@ -232,6 +327,27 @@ body[data-theme="neon"] .card::before {
 
 .uploader {
   padding: 20px;
+}
+
+.summary-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.summary-toggle input {
+  inline-size: 18px;
+  block-size: 18px;
+  accent-color: var(--accent);
+}
+
+.summary-toggle span {
+  color: var(--muted);
 }
 
 .dropzone {
@@ -326,10 +442,66 @@ body[data-theme="neon"] .primary-button {
   cursor: progress;
 }
 
+.secondary-button {
+  min-height: 42px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+  box-shadow: var(--shadow);
+}
+
+.secondary-button:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+}
+
+body[data-theme="neon"] .secondary-button {
+  background: rgba(17, 10, 31, 0.88);
+  color: #f7f2ff;
+}
+
 .status {
   min-height: 24px;
   margin-top: 16px;
   font-size: 0.96rem;
+}
+
+.results-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+
+.download-format {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.download-format select {
+  min-height: 42px;
+  padding: 10px 36px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font: inherit;
+  box-shadow: var(--shadow);
+}
+
+body[data-theme="neon"] .download-format select {
+  background: rgba(17, 10, 31, 0.88);
+  color: #f7f2ff;
 }
 
 .results {
@@ -465,8 +637,13 @@ body[data-theme="neon"] .transcript {
     grid-column: span 1;
   }
 
+  .settings-header,
   .section-header,
   .chapter-heading {
     flex-direction: column;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
   }
 }

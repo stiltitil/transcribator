@@ -1,11 +1,13 @@
 {
   "name": "transcribator",
   "version": "1.0.0",
-  "description": "Video/audio transcriber with summaries and timestamps",
-  "main": "server.js",
+  "description": "Local video and audio transcriber with timestamps, structured meeting summaries, desktop mode, and multi-format export",
+  "main": "electron/main.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "desktop": "electron .",
+    "dist:win": "electron-builder --win portable",
     "test": "node --test"
   },
   "keywords": [],
@@ -19,5 +21,53 @@
     "ffprobe-static": "^3.1.0",
     "multer": "^2.1.1",
     "openai": "^6.32.0"
+  },
+  "devDependencies": {
+    "electron": "^37.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.stilt.transcribator",
+    "productName": "Transcribator",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/ffprobe-static/**"
+    ],
+    "files": [
+      "electron/**/*",
+      "public/**/*",
+      "server.js",
+      "package.json",
+      "package-lock.json",
+      ".env.example"
+    ],
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      },
+      {
+        "from": "uploads",
+        "to": "uploads",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
   }
 }
