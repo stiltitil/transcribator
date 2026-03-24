@@ -18,6 +18,8 @@ const maxUploadBytes = Number(process.env.MAX_UPLOAD_MB || 512) * 1024 * 1024;
 const maxApiFileBytes = 24 * 1024 * 1024;
 const preparedAudioBitrate = process.env.AUDIO_BITRATE || "48k";
 const preparedAudioSampleRate = process.env.AUDIO_SAMPLE_RATE || "16000";
+const deepgramModel = process.env.DEEPGRAM_MODEL || "nova-3";
+const deepgramLanguage = process.env.DEEPGRAM_LANGUAGE || "ru";
 
 const supportedMimeTypes = new Set([
   "audio/mpeg",
@@ -43,8 +45,12 @@ const supportedExtensions = new Set([
   ".mov",
 ]);
 
+if (!process.env.DEEPGRAM_API_KEY) {
+  console.warn("DEEPGRAM_API_KEY is missing. Transcription routes will fail until it is set.");
+}
+
 if (!process.env.OPENAI_API_KEY) {
-  console.warn("OPENAI_API_KEY is missing. API routes will fail until it is set.");
+  console.warn("OPENAI_API_KEY is missing. Summary generation will fail until it is set.");
 }
 
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -88,14 +94,22 @@ app.use(express.static(path.join(__dirname, "public")));
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    hasApiKey: Boolean(process.env.OPENAI_API_KEY),
-    transcriptionModel: process.env.TRANSCRIPTION_MODEL || "whisper-1",
+    hasTranscriptionKey: Boolean(process.env.DEEPGRAM_API_KEY),
+    hasSummaryKey: Boolean(process.env.OPENAI_API_KEY),
+    transcriptionModel: deepgramModel,
     summaryModel: process.env.SUMMARY_MODEL || "gpt-4o-mini",
   });
 });
 
 app.post("/api/transcribe", upload.single("media"), async (req, res) => {
   let cleanupPaths = [];
+
+  if (!process.env.DEEPGRAM_API_KEY) {
+    res.status(500).json({
+      error: "DEEPGRAM_API_KEY is not configured.",
+    });
+    return;
+  }
 
   if (!process.env.OPENAI_API_KEY) {
     res.status(500).json({
@@ -140,7 +154,7 @@ app.post("/api/transcribe", upload.single("media"), async (req, res) => {
         preparedAudioSizeMb: toMb(prepared.audioSizeBytes),
         chunkCount: prepared.chunks.length,
         preprocessing: prepared.mode,
-        transcriptionModel: process.env.TRANSCRIPTION_MODEL || "whisper-1",
+        transcriptionModel: deepgramModel,
         summaryModel: process.env.SUMMARY_MODEL || "gpt-4o-mini",
       },
     });
@@ -174,17 +188,33 @@ app.listen(port, () => {
 });
 
 async function transcribeFile(filePath) {
-  const openai = getOpenAIClient();
-  const transcriptionModel = process.env.TRANSCRIPTION_MODEL || "whisper-1";
-
-  const response = await openai.audio.transcriptions.create({
-    file: fs.createReadStream(filePath),
-    model: transcriptionModel,
-    response_format: "verbose_json",
-    timestamp_granularities: ["segment"],
+  const query = new URLSearchParams({
+    model: deepgramModel,
+    language: deepgramLanguage,
+    punctuate: "true",
+    diarize: "true",
+    utterances: "true",
+    smart_format: "true",
   });
 
-  return response;
+  const response = await fetch(`https://api.deepgram.com/v1/listen?${query.toString()}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
+      "Content-Type": "audio/mpeg",
+    },
+    body: await fsp.readFile(filePath),
+  });
+
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.err_msg || payload?.message || payload?.error || "Deepgram transcription failed."
+    );
+  }
+
+  return normalizeDeepgramTranscript(payload);
 }
 
 async function transcribePreparedChunks(chunks) {
@@ -216,6 +246,77 @@ async function transcribePreparedChunks(chunks) {
   }
 
   return combined;
+}
+
+function normalizeDeepgramTranscript(payload) {
+  const results = payload?.results || {};
+  const alternative = results?.channels?.[0]?.alternatives?.[0] || {};
+  const utterances = Array.isArray(results.utterances) ? results.utterances : [];
+
+  const segments = utterances.length
+    ? utterances
+        .map((utterance, index) => ({
+          id: utterance.id ?? index,
+          start: Number(utterance.start || 0),
+          end: Number(utterance.end || 0),
+          text: String(utterance.transcript || "").trim(),
+        }))
+        .filter((segment) => segment.text)
+    : buildDeepgramWordSegments(alternative.words);
+
+  return {
+    text:
+      String(alternative.transcript || "").trim() ||
+      segments.map((segment) => segment.text).join("\n").trim(),
+    language: results?.languages?.[0] || deepgramLanguage || "unknown",
+    segments,
+  };
+}
+
+function buildDeepgramWordSegments(words) {
+  if (!Array.isArray(words) || words.length === 0) {
+    return [];
+  }
+
+  const segments = [];
+  let current = null;
+
+  for (const word of words) {
+    const token = String(word?.punctuated_word || word?.word || "").trim();
+
+    if (!token) {
+      continue;
+    }
+
+    const speaker =
+      typeof word?.speaker === "number" || typeof word?.speaker === "string"
+        ? word.speaker
+        : "unknown";
+
+    if (!current || current.speaker !== speaker) {
+      current = {
+        id: segments.length,
+        start: Number(word.start || 0),
+        end: Number(word.end || 0),
+        speaker,
+        parts: [token],
+      };
+      segments.push(current);
+      continue;
+    }
+
+    current.end = Number(word.end || current.end || 0);
+    current.parts.push(token);
+  }
+
+  return segments
+    .map((segment) => ({
+      id: segment.id,
+      start: segment.start,
+      end: segment.end,
+      text: segment.parts.join(" ").trim(),
+    }))
+    .filter((segment) => segment.text);
 }
 
 async function prepareMediaForTranscription(file) {
