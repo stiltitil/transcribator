@@ -77,6 +77,8 @@ npm.cmd start
 
 Или просто запусти [start-app.bat](C:/Users/Askay/Desktop/AI/transcribator/start-app.bat) двойным кликом.
 
+Для отдельного тестового стенда Deepgram можно запустить [start-deepgram-test.bat](C:/Users/Askay/Desktop/AI/transcribator-deepgram-test/start-deepgram-test.bat). Он поднимет Deepgram-режим на `http://localhost:3001`, чтобы основную OpenAI-версию можно было держать параллельно на `http://localhost:3000`.
+
 ## Переменные окружения
 
 - `OPENAI_API_KEY` - обязателен для summary
