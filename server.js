@@ -55,7 +55,7 @@ if (!process.env.OPENAI_API_KEY) {
   console.warn("OPENAI_API_KEY is missing. API routes will fail until it is set.");
 }
 
-if (transcriptionProvider === "deepgram" && !process.env.DEEPGRAM_API_KEY) {
+if (defaultTranscriptionProvider === "deepgram" && !process.env.DEEPGRAM_API_KEY) {
   console.warn("DEEPGRAM_API_KEY is missing. Deepgram transcription will fail until it is set.");
 }
 
